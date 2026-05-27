@@ -6,6 +6,7 @@ import {
   Lock,
   Sparkles,
 } from "lucide-react";
+import { LearningModeBadge } from "@/components/learning-mode-picker";
 import { Progress as ProgressBar } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -16,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import type { LearningModeSettings } from "@/lib/learning-mode-types";
 import type { Progress } from "@/lib/progress";
 import type { Course, CourseSummary, Lesson } from "@/lib/syllabus";
 
@@ -40,6 +42,9 @@ type SidebarProps = {
   course: Course;
   progress: Progress;
   activeLessonId: string;
+  learningMode: LearningModeSettings;
+  timeRemainingMinutes: number | null;
+  onOpenModePicker: () => void;
   onSelectCourse: (courseId: string) => void;
   onSelectLesson: (lessonId: string) => void;
 };
@@ -49,6 +54,9 @@ export function Sidebar({
   course,
   progress,
   activeLessonId,
+  learningMode,
+  timeRemainingMinutes,
+  onOpenModePicker,
   onSelectCourse,
   onSelectLesson,
 }: SidebarProps) {
@@ -57,11 +65,15 @@ export function Sidebar({
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-r border-border bg-card">
-      <div className="space-y-4 border-b border-border px-6 pt-7 pb-6">
-        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          <GraduationCap className="size-4" />
-          Fellowship Tutor
+    <aside className="sidebar-glow flex w-80 shrink-0 flex-col border-r border-border/60 shadow-[4px_0_24px_-12px_color-mix(in_oklch,var(--brand)_18%,transparent)]">
+      <div className="space-y-4 border-b border-border/60 px-6 pt-7 pb-6">
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-8 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-[oklch(0.55_0.14_38)] text-white shadow-md shadow-brand/30">
+            <GraduationCap className="size-4" />
+          </span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Fellowship Tutor
+          </span>
         </div>
         <div className="space-y-1.5">
           <label
@@ -115,6 +127,11 @@ export function Sidebar({
             className="h-1.5 bg-muted [&>div]:bg-brand"
           />
         </div>
+        <LearningModeBadge
+          settings={learningMode}
+          timeRemainingMinutes={timeRemainingMinutes}
+          onOpenPicker={onOpenModePicker}
+        />
       </div>
 
       <ScrollArea className="flex-1">
@@ -135,12 +152,12 @@ export function Sidebar({
                   disabled={!isClickable}
                   onClick={() => isClickable && onSelectLesson(lesson.id)}
                   className={cn(
-                    "group flex w-full items-start gap-3 rounded-lg p-3 text-left transition-all",
+                    "group flex w-full items-start gap-3 rounded-xl p-3 text-left transition-all",
                     isClickable
-                      ? "cursor-pointer hover:bg-muted"
+                      ? "cursor-pointer hover:bg-muted/80 hover:shadow-sm"
                       : "cursor-not-allowed opacity-55",
                     status === "current" &&
-                      "bg-brand/8 ring-1 ring-brand/30 hover:bg-brand/12"
+                      "bg-brand/10 ring-1 ring-brand/25 shadow-sm hover:bg-brand/14"
                   )}
                 >
                   <StatusIcon status={status} />

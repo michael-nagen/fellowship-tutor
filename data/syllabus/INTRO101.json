@@ -1,0 +1,21 @@
+{
+  "id": "INTRO101",
+  "title": "Getting started with Fellowship Tutor",
+  "description": "Meet your tutor, learn every feature, and set your learning preferences. Start here before a subject course like Python or Frontend.",
+  "lessons": [
+    {
+      "id": "intro101-onboarding",
+      "title": "Welcome: how this tutor works",
+      "kind": "onboarding",
+      "promptPath": "prompt-onboarding.md",
+      "outcomes": [
+        "Share a personal hello — name, goals, and context saved for future sessions",
+        "Explain how to use the chat and navigate lessons in the sidebar",
+        "Describe the regular lesson flow: roadmap, topics, checkpoints, and completion",
+        "Name every major feature: learning modes, lesson plan, notebook, deep dive, cowork, and breaks",
+        "Name at least two habits that help them learn well with this tutor",
+        "Share personal learning preferences (or confirm defaults) for future sessions"
+      ]
+    }
+  ]
+}

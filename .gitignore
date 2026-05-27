@@ -44,3 +44,13 @@ next-env.d.ts
 # per-user runtime state — syllabus + prompt are content and stay committed
 data/progress/*.json
 !data/progress/.gitkeep
+data/learner/*.json
+!data/learner/.gitkeep
+data/notebook/*.json
+!data/notebook/.gitkeep
+data/lesson-plan/**/*.json
+!data/lesson-plan/.gitkeep
+data/deep-dive/*.json
+!data/deep-dive/.gitkeep
+data/cowork/*.json
+!data/cowork/.gitkeep

@@ -5,6 +5,9 @@ export type Lesson = {
   id: string;
   title: string;
   outcomes: string[];
+  /** Optional prompt file under data/ (e.g. prompt-onboarding.md). */
+  promptPath?: string;
+  kind?: "onboarding";
 };
 
 export type Course = {

@@ -10,6 +10,7 @@ import {
   ArrowRight,
   BookOpen,
   CheckCircle2,
+  Clock,
   Sparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,10 +30,24 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
+import {
+  NotebookToggleButton,
+  useNotebookHasNotes,
+} from "@/components/course-notebook";
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TimeSessionBar } from "@/components/time-session-bar";
+import type { StudyBreakRecord } from "@/lib/break-timer";
+import {
+  StudyBreakOverlay,
+} from "@/components/study-break";
 import { cn } from "@/lib/utils";
+import type { LearningModeSettings } from "@/lib/learning-mode-types";
+import {
+  formatBudgetLabel,
+  groupSessionTopics,
+  type TimeSessionRecord,
+} from "@/lib/time-session-types";
 import type { Course, Lesson } from "@/lib/syllabus";
 
 type CompleteLessonOutput = {
@@ -73,6 +88,21 @@ type LessonChatProps = {
   isAlreadyCompleted: boolean;
   onLessonCompleted: (lessonId: string) => Promise<string | null>;
   onAdvance: (lessonId: string) => void;
+  onLessonPlanUpdated?: () => void;
+  notebookOpen: boolean;
+  onToggleNotebook: () => void;
+  learningMode?: LearningModeSettings;
+  timeSession?: TimeSessionRecord | null;
+  timeRemainingMinutes?: number | null;
+  onPauseSession?: (breakMinutes: number) => Promise<void>;
+  onResumeSession?: () => Promise<void>;
+  onExtendSession?: (extraMinutes: number) => Promise<void>;
+  onEndSession?: () => Promise<void>;
+  breakActive?: boolean;
+  studyBreakRecord?: StudyBreakRecord | null;
+  studyBreakRemainingSeconds?: number;
+  studyBreakExpired?: boolean;
+  onEndBreak?: () => Promise<void>;
 };
 
 export function LessonChat({
@@ -81,10 +111,27 @@ export function LessonChat({
   isAlreadyCompleted,
   onLessonCompleted,
   onAdvance,
+  onLessonPlanUpdated,
+  notebookOpen,
+  onToggleNotebook,
+  learningMode,
+  timeSession,
+  timeRemainingMinutes,
+  onPauseSession,
+  onResumeSession,
+  onExtendSession,
+  onEndSession,
+  breakActive = false,
+  studyBreakRecord,
+  studyBreakRemainingSeconds = 0,
+  studyBreakExpired = false,
+  onEndBreak,
 }: LessonChatProps) {
   const [input, setInput] = useState("");
   const [nextLessonId, setNextLessonId] = useState<string | null>(null);
   const handledCompletionRef = useRef<string | null>(null);
+  const handledPlanUpdatesRef = useRef<Set<string>>(new Set());
+  const hasNotes = useNotebookHasNotes(course.id, lesson.id);
 
   const transport = useMemo(
     () =>
@@ -108,10 +155,43 @@ export function LessonChat({
     const key = completion.toolCallId;
     if (handledCompletionRef.current === key) return;
     handledCompletionRef.current = key;
+    onLessonPlanUpdated?.();
     onLessonCompleted(lesson.id).then((next) => {
       setNextLessonId(next);
     });
-  }, [completion, lesson.id, onLessonCompleted]);
+  }, [completion, lesson.id, onLessonCompleted, onLessonPlanUpdated]);
+
+  useEffect(() => {
+    if (!onLessonPlanUpdated) return;
+    for (const message of messages) {
+      if (message.role !== "assistant") continue;
+      for (const part of message.parts) {
+        const toolPart = part as ToolUIPart;
+        if (
+          toolPart.type === "tool-mark_topic_complete" &&
+          toolPart.state === "output-available"
+        ) {
+          const output = toolPart.output as { ok?: boolean };
+          if (!output?.ok) continue;
+          const key = toolPart.toolCallId;
+          if (handledPlanUpdatesRef.current.has(key)) continue;
+          handledPlanUpdatesRef.current.add(key);
+          onLessonPlanUpdated();
+        }
+        if (
+          (toolPart.type === "tool-extend_time_session" ||
+            toolPart.type === "tool-end_time_session" ||
+            toolPart.type === "tool-start_break") &&
+          toolPart.state === "output-available"
+        ) {
+          const key = toolPart.toolCallId;
+          if (handledPlanUpdatesRef.current.has(key)) continue;
+          handledPlanUpdatesRef.current.add(key);
+          onLessonPlanUpdated();
+        }
+      }
+    }
+  }, [messages, onLessonPlanUpdated]);
 
   const handleSubmit = useCallback(
     (msg: PromptInputMessage) => {
@@ -132,13 +212,46 @@ export function LessonChat({
   );
 
   const emptyStateSuggestions = useMemo(
-    () => buildSuggestions(),
-    []
+    () => buildSuggestions(lesson),
+    [lesson]
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col">
-      <LessonHeader course={course} lesson={lesson} />
+    <div className="relative flex h-full min-h-0 flex-1 flex-col">
+      <LessonHeader
+        course={course}
+        lesson={lesson}
+        learningMode={learningMode}
+        timeSession={timeSession}
+        timeRemainingMinutes={timeRemainingMinutes}
+      />
+
+      {studyBreakRecord && onEndBreak && (
+        <StudyBreakOverlay
+          record={studyBreakRecord}
+          remainingSeconds={studyBreakRemainingSeconds}
+          expired={studyBreakExpired}
+          onEndBreak={() => void onEndBreak()}
+        />
+      )}
+
+      {learningMode?.mode === "time" &&
+        timeSession &&
+        timeSession.status !== "ended" &&
+        timeRemainingMinutes !== null &&
+        onPauseSession &&
+        onResumeSession &&
+        onExtendSession &&
+        onEndSession && (
+          <TimeSessionBar
+            session={timeSession}
+            remainingMinutes={timeRemainingMinutes ?? 0}
+            onPause={onPauseSession}
+            onResume={onResumeSession}
+            onExtend={onExtendSession}
+            onEnd={onEndSession}
+          />
+        )}
 
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-6 py-8">
@@ -175,13 +288,17 @@ export function LessonChat({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="relative border-t border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="relative border-t border-border/70 bg-card/60 backdrop-blur-md supports-[backdrop-filter]:bg-card/50">
         {isStreaming && (
           <div className="tutor-stream-bar absolute inset-x-0 top-0 h-px" />
         )}
         <div className="mx-auto w-full max-w-3xl px-6 py-4">
           {isComplete ? (
             <LockedInputNotice
+              course={course}
+              lesson={lesson}
+              notebookOpen={notebookOpen}
+              onToggleNotebook={onToggleNotebook}
               nextLesson={
                 nextLessonId
                   ? course.lessons.find((l) => l.id === nextLessonId) ?? null
@@ -193,24 +310,35 @@ export function LessonChat({
           ) : (
             <PromptInput
               onSubmit={handleSubmit}
-              className="rounded-2xl border border-border bg-card shadow-sm focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/20"
+              className="rounded-2xl border border-border/80 bg-card/90 shadow-sm backdrop-blur-sm focus-within:border-brand/50 focus-within:ring-2 focus-within:ring-brand/15"
             >
               <PromptInputTextarea
                 value={input}
                 onChange={(e) => setInput(e.currentTarget.value)}
-                placeholder={`Talk through "${lesson.title}" with your tutor…`}
-                disabled={isComplete}
+                placeholder={
+                  breakActive
+                    ? "On a break — come back when the timer ends…"
+                    : `Talk through "${lesson.title}" with your tutor…`
+                }
+                disabled={isComplete || breakActive}
               />
-              <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
-                <p className="text-[11px] text-muted-foreground">
-                  Press <kbd className="font-mono">Enter</kbd> to send,{" "}
-                  <kbd className="font-mono">Shift+Enter</kbd> for newline
+              <div className="flex items-center justify-between gap-2 px-3 pb-2.5 pt-0.5">
+                <p className="min-w-0 truncate text-[11px] text-muted-foreground">
+                  <kbd className="font-mono">Enter</kbd> send ·{" "}
+                  <kbd className="font-mono">Shift+Enter</kbd> newline
                 </p>
-                <PromptInputSubmit
-                  status={status}
-                  onStop={stop}
-                  disabled={!input.trim() && !isStreaming}
-                />
+                <div className="flex shrink-0 items-center gap-1">
+                  <NotebookToggleButton
+                    active={notebookOpen}
+                    hasNotes={hasNotes}
+                    onClick={onToggleNotebook}
+                  />
+                  <PromptInputSubmit
+                    status={status}
+                    onStop={stop}
+                    disabled={breakActive || (!input.trim() && !isStreaming)}
+                  />
+                </div>
               </div>
             </PromptInput>
           )}
@@ -220,26 +348,72 @@ export function LessonChat({
   );
 }
 
-function LessonHeader({ course, lesson }: { course: Course; lesson: Lesson }) {
+function LessonHeader({
+  course,
+  lesson,
+  learningMode,
+  timeSession,
+  timeRemainingMinutes,
+}: {
+  course: Course;
+  lesson: Lesson;
+  learningMode?: LearningModeSettings;
+  timeSession?: TimeSessionRecord | null;
+  timeRemainingMinutes?: number | null;
+}) {
+  const showTimer =
+    learningMode?.mode === "time" &&
+    timeSession &&
+    timeSession.status !== "ended" &&
+    timeRemainingMinutes !== null &&
+    timeRemainingMinutes !== undefined;
+
+  const sessionLessons = timeSession
+    ? groupSessionTopics(timeSession.plannedTopics)
+    : [];
+
   return (
-    <header className="border-b border-border bg-background/60 px-6 py-5 backdrop-blur supports-[backdrop-filter]:bg-background/40">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-          <BookOpen className="size-3.5" />
-          <span className="uppercase tracking-wider">{course.title}</span>
+    <header className="border-b border-border/70 bg-card/50 px-6 py-4 backdrop-blur-md supports-[backdrop-filter]:bg-card/40">
+      <div className="mx-auto flex w-full max-w-3xl items-start justify-between gap-3">
+        <div className="min-w-0 flex flex-1 flex-col gap-1">
+          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <BookOpen className="size-3.5" />
+            <span className="uppercase tracking-wider">{course.title}</span>
+          </div>
+          {showTimer && timeSession ? (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight">
+                {formatBudgetLabel(timeSession.budgetMinutes)} study session
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {timeSession.plannedTopics.length} topics ·{" "}
+                {sessionLessons.map((g) => g.lessonTitle).join(" · ")}
+              </p>
+              <p className="text-[11px] text-muted-foreground/80">
+                Now in: {lesson.title}
+              </p>
+            </>
+          ) : (
+            <h2 className="text-xl font-semibold tracking-tight">{lesson.title}</h2>
+          )}
         </div>
-        <h2 className="text-xl font-semibold tracking-tight">{lesson.title}</h2>
-        <div className="flex flex-wrap gap-1.5">
-          {lesson.outcomes.map((outcome, i) => (
-            <Badge
-              key={i}
-              variant="secondary"
-              className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-normal text-muted-foreground"
-            >
-              {outcome}
-            </Badge>
-          ))}
-        </div>
+        {showTimer && (
+          <div
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
+              timeSession?.status === "paused"
+                ? "bg-muted text-muted-foreground"
+                : timeRemainingMinutes <= 5
+                  ? "bg-brand/15 text-brand"
+                  : "bg-brand/10 text-brand"
+            )}
+          >
+            <Clock className="size-3.5" />
+            {timeSession?.status === "paused"
+              ? "Paused"
+              : `${timeRemainingMinutes}m left`}
+          </div>
+        )}
       </div>
     </header>
   );
@@ -265,6 +439,21 @@ function MessageView({ message }: { message: UIMessage }) {
               </MessageResponse>
             );
           }
+          if (part.type === "tool-mark_topic_complete") {
+            const toolPart = part as ToolUIPart;
+            if (toolPart.state === "output-available") {
+              return null;
+            }
+            return (
+              <div
+                key={i}
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Sparkles className="size-4 animate-pulse text-brand" />
+                Updating lesson plan…
+              </div>
+            );
+          }
           if (part.type === "tool-complete_lesson") {
             const toolPart = part as ToolUIPart;
             if (toolPart.state === "output-available") {
@@ -277,6 +466,62 @@ function MessageView({ message }: { message: UIMessage }) {
               >
                 <Sparkles className="size-4 animate-pulse text-brand" />
                 Checking the mastery outcomes…
+              </div>
+            );
+          }
+          if (part.type === "tool-save_personal_intro") {
+            const toolPart = part as ToolUIPart;
+            if (toolPart.state === "output-available") {
+              const output = toolPart.output as { ok?: boolean };
+              if (output?.ok) {
+                return (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-brand/25 bg-brand/5 px-3 py-2 text-sm text-muted-foreground"
+                  >
+                    Saved your intro — I&apos;ll remember this in future sessions.
+                  </div>
+                );
+              }
+              return null;
+            }
+            return (
+              <div
+                key={i}
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Sparkles className="size-4 animate-pulse text-brand" />
+                Saving your intro…
+              </div>
+            );
+          }
+          if (part.type === "tool-save_learning_preferences") {
+            const toolPart = part as ToolUIPart;
+            if (toolPart.state === "output-available") {
+              const output = toolPart.output as {
+                ok?: boolean;
+                error?: string;
+              };
+              if (output?.ok) {
+                return (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-brand/25 bg-brand/5 px-3 py-2 text-sm text-muted-foreground"
+                  >
+                    Saved your learning preferences — I&apos;ll tailor future
+                    lessons to match.
+                  </div>
+                );
+              }
+              return null;
+            }
+            return (
+              <div
+                key={i}
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Sparkles className="size-4 animate-pulse text-brand" />
+                Saving your learning preferences…
               </div>
             );
           }
@@ -298,7 +543,7 @@ function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center gap-5 py-16 text-center">
-      <div className="relative inline-flex size-12 items-center justify-center rounded-2xl bg-brand/10">
+      <div className="relative inline-flex size-12 items-center justify-center rounded-2xl bg-brand/12 ring-1 ring-brand/20">
         <Sparkles className="size-6 text-brand" />
       </div>
       <div className="max-w-md space-y-2">
@@ -306,9 +551,19 @@ function EmptyState({
           Ready when you are
         </h3>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Say hi, ask a question, or jump straight in. We&apos;ll work through{" "}
-          <span className="font-medium text-foreground">{lesson.title}</span>{" "}
-          together at your pace.
+          {lesson.kind === "onboarding" ? (
+            <>
+              Start with a hello — we&apos;ll get to know you, tour every feature,
+              and set your learning preferences.
+            </>
+          ) : (
+            <>
+              Say hi, ask a question, or jump straight in. We&apos;ll work
+              through{" "}
+              <span className="font-medium text-foreground">{lesson.title}</span>{" "}
+              together at your pace.
+            </>
+          )}
         </p>
       </div>
       <Suggestions className="max-w-2xl justify-center pt-2">
@@ -336,7 +591,7 @@ function CompletionCard({
 }) {
   return (
     <div className="tutor-pop-in">
-      <div className="overflow-hidden rounded-2xl border border-brand/30 bg-gradient-to-br from-brand/5 to-transparent">
+      <div className="overflow-hidden rounded-2xl border border-brand/25 bg-gradient-to-br from-brand/8 via-brand-soft/40 to-transparent shadow-sm">
         <div className="flex items-start gap-4 px-5 py-5">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-success/15">
             <CheckCircle2 className="size-5 text-success" />
@@ -379,32 +634,58 @@ function CompletionCard({
 }
 
 function LockedInputNotice({
+  course,
+  lesson,
   nextLesson,
   onAdvance,
   alreadyCompletedBeforeChat,
+  notebookOpen,
+  onToggleNotebook,
 }: {
+  course: Course;
+  lesson: Lesson;
   nextLesson: Lesson | null;
   onAdvance: (lessonId: string) => void;
   alreadyCompletedBeforeChat: boolean;
+  notebookOpen: boolean;
+  onToggleNotebook: () => void;
 }) {
+  const hasNotes = useNotebookHasNotes(course.id, lesson.id);
+
   return (
     <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3">
-      <p className="text-sm text-muted-foreground">
+      <p className="min-w-0 text-sm text-muted-foreground">
         {alreadyCompletedBeforeChat
           ? "You've already mastered this lesson. Open the next one to keep going."
           : "This lesson is complete. Ready for the next one?"}
       </p>
-      {nextLesson && (
-        <Button onClick={() => onAdvance(nextLesson.id)} size="sm">
-          Continue
-          <ArrowRight className="size-4" />
-        </Button>
-      )}
+      <div className="flex shrink-0 items-center gap-2">
+        <NotebookToggleButton
+          active={notebookOpen}
+          hasNotes={hasNotes}
+          onClick={onToggleNotebook}
+        />
+        {nextLesson && (
+          <Button onClick={() => onAdvance(nextLesson.id)} size="sm">
+            Continue
+            <ArrowRight className="size-4" />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
 
-function buildSuggestions(): string[] {
+function buildSuggestions(lesson: Lesson): string[] {
+  if (lesson.kind === "onboarding") {
+    return [
+      "Hi! I'm new here — let's start with a quick hello.",
+      "Walk me through all the features in the app.",
+      "What does a typical lesson look like?",
+      "I'm ready to set my learning preferences.",
+    ];
+  }
+
   const seeds = [
     "I'm new to this — where should we start?",
     "Quiz me on what I should know already.",
