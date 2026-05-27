@@ -13,6 +13,11 @@ import {
   StudyBreakOverlay,
   useStudyBreakTimer,
 } from "@/components/study-break";
+import {
+  ProactiveBreakBanner,
+  recordStudyBreakApi,
+  useStudyTimeTracker,
+} from "@/components/study-time-tracker";
 import type { DeepDiveTarget } from "@/components/deep-dive-panel";
 import {
   type LearningModeSettings,
@@ -188,11 +193,12 @@ function TutorShellInner({
 
   const onBreakStart = useCallback(
     async (minutes: number) => {
+      void recordStudyBreakApi(course.id, minutes);
       if (learningMode.mode === "time" && timeSession?.status === "active") {
         await handlePauseSession(minutes);
       }
     },
-    [learningMode.mode, timeSession?.status, handlePauseSession]
+    [course.id, learningMode.mode, timeSession?.status, handlePauseSession]
   );
 
   const onBreakEnd = useCallback(async () => {
@@ -201,11 +207,28 @@ function TutorShellInner({
     }
   }, [learningMode.mode, timeSession?.status, handleResumeSession]);
 
+  const activeLesson = useMemo(
+    () =>
+      course.lessons.find((l) => l.id === activeLessonId) ?? course.lessons[0],
+    [activeLessonId, course.lessons]
+  );
+
   const studyBreak = useStudyBreakTimer({
     courseId: course.id,
     onBreakStart,
     onBreakEnd,
   });
+
+  const studyTime = useStudyTimeTracker({
+    courseId: course.id,
+    breakActive: studyBreak.breakActive,
+    enabled: activeLesson.kind !== "onboarding",
+  });
+
+  const handleProactiveBreak = useCallback(() => {
+    studyTime.dismissSuggestion();
+    void studyBreak.startBreak(5);
+  }, [studyBreak, studyTime]);
 
   const breakRestoreRef = useRef(false);
   useEffect(() => {
@@ -311,12 +334,6 @@ function TutorShellInner({
     setDeepDiveTarget(null);
   }, []);
 
-  const activeLesson = useMemo(
-    () =>
-      course.lessons.find((l) => l.id === activeLessonId) ?? course.lessons[0],
-    [activeLessonId, course.lessons]
-  );
-
   const chatKey = `${activeLesson.id}-${learningMode.mode}-${learningMode.updatedAt}-${timeSession?.sessionId ?? "none"}`;
 
   return (
@@ -333,6 +350,13 @@ function TutorShellInner({
         onSelectLesson={goToLesson}
       />
       <main className="tutor-backdrop relative flex min-w-0 flex-1 flex-col">
+        {studyTime.showProactiveBreak && studyTime.stats && (
+          <ProactiveBreakBanner
+            stats={studyTime.stats}
+            onTakeBreak={handleProactiveBreak}
+            onDismiss={studyTime.dismissSuggestion}
+          />
+        )}
         <LessonChat
           key={chatKey}
           course={course}
