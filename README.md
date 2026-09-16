@@ -1,5 +1,15 @@
 # Fellowship Tutor
 
+> **One-on-one AI learning experience** — guides a learner through a structured course with Socratic tutoring, measurable lesson outcomes, and explicit progress controls.
+
+## Why it stands out
+
+- **Mastery before progression:** the tutor advances a learner only after the current lesson outcomes are demonstrated.
+- **Clear product control:** lesson completion is a validated tool action, not an unguarded model-side state change.
+- **Editable course design:** course content and tutoring behavior live in simple local files, making the learning experience easy to adapt.
+- **Modern delivery:** a streaming Next.js interface with an AI SDK-powered tutoring loop and a responsive progress sidebar.
+
+
 A focused, one-on-one AI tutor that walks a learner through a course one lesson at a time. The tutor is patient, Socratic, and refuses to advance until every mastery outcome for the current lesson has been demonstrated. Progress is stored on disk — there is no database.
 
 ## Quick start
